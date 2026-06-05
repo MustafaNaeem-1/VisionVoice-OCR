@@ -1,0 +1,41 @@
+name: vision_voice
+description: "VisionVoice – Real-time OCR & TTS Accessibility App for visually impaired users."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # Camera
+  camera: ^0.11.1
+
+  # ML Kit Text Recognition (0.15.1 uses mlkit_commons 0.11.x → AGP 8.x)
+  google_mlkit_text_recognition: ^0.15.1
+
+  # Text-to-Speech
+  flutter_tts: ^4.2.0
+
+  # Permissions (12.x uses permission_handler_android 13.x → AGP 8.3+)
+  permission_handler: ^12.0.1
+
+
+  # Path provider (for future image caching)
+  path_provider: ^2.1.5
+
+  # Vibration / Haptics
+  vibration: ^2.0.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
