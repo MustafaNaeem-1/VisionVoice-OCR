@@ -33,6 +33,8 @@ dependencies:
   vibration: ^2.0.1
   image: ^4.9.1
   flutter_tesseract_ocr: ^0.4.31
+  http: ^1.6.0
+  connectivity_plus: ^7.1.1
 
 dev_dependencies:
   flutter_test:

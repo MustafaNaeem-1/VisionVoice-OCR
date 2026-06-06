@@ -7,8 +7,8 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:vibration/vibration.dart';
 import '../models/recognition_language.dart';
 import '../services/camera_service.dart';
+import '../services/google_vision_urdu_ocr_service.dart';
 import '../services/tts_service.dart';
-import '../services/urdu_ocr_service.dart';
 import '../widgets/detected_text_panel.dart';
 
 enum ScanMode { live, frozen }
@@ -24,7 +24,8 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
     with TickerProviderStateMixin {
   late CameraService _cameraService;
   late TtsService _ttsService;
-  final UrduOcrService _urduOcrService = UrduOcrService();
+  final GoogleVisionUrduOcrService _googleVisionUrduOcrService =
+      GoogleVisionUrduOcrService();
   late AnimationController _holdController;
   late Animation<double> _holdScale;
 
@@ -175,12 +176,9 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
     if (!mounted) return;
     final displayText =
         _language == RecognitionLanguage.urdu && text.isEmpty && !hasOcrError
-            ? 'No Urdu text found. Try holding the camera steady and scan again.'
-            : _language == RecognitionLanguage.urdu &&
-                text.isNotEmpty &&
-                _urduOcrService.lastScore <
-                    UrduOcrService.lowConfidenceScoreThreshold
-            ? UrduOcrService.lowConfidenceMessage
+            ? _googleVisionUrduOcrService.lastErrorMessage.isNotEmpty
+                ? _googleVisionUrduOcrService.lastErrorMessage
+                : GoogleVisionUrduOcrService.noTextMessage
             : text;
     setState(() {
       _detectedText = displayText;
@@ -192,6 +190,8 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
               ? ScannerStatus.error
               : text.isEmpty
               ? ScannerStatus.noText
+              : _language == RecognitionLanguage.urdu
+              ? ScannerStatus.urduTextDetected
               : ScannerStatus.textDetected;
       _panelExpanded = displayText.length > 120;
     });
@@ -231,7 +231,9 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
 
     final XFile image = await controller.takePicture();
     try {
-      return await _urduOcrService.recognizeUrduFromImagePath(image.path);
+      return await _googleVisionUrduOcrService.recognizeUrduFromImagePath(
+        image.path,
+      );
     } finally {
       try {
         final file = File(image.path);
