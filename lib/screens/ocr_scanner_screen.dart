@@ -313,46 +313,74 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
   }
 
   Widget _buildScrims() {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withValues(alpha: 0.70),
-            Colors.black.withValues(alpha: 0.10),
-            Colors.black.withValues(alpha: 0.20),
-            Colors.black.withValues(alpha: 0.86),
-          ],
-          stops: const [0.0, 0.26, 0.56, 1.0],
-        ),
+    return IgnorePointer(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Align(
+            alignment: Alignment.topCenter,
+            child: FractionallySizedBox(
+              heightFactor: 0.22,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.42),
+                      Colors.black.withValues(alpha: 0.0),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: FractionallySizedBox(
+              heightFactor: 0.30,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.52),
+                      Colors.black.withValues(alpha: 0.0),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildTopBar() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
           child: Container(
-            constraints: const BoxConstraints(minHeight: 64),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            constraints: const BoxConstraints(minHeight: 56),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
-              color: const Color(0xFF0B1020).withValues(alpha: 0.62),
+              color: const Color(0xFF0B1020).withValues(alpha: 0.56),
               border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(20),
             ),
             child: Row(
               children: [
                 const Icon(
                   Icons.visibility_rounded,
                   color: Color(0xFF38D7FF),
-                  size: 28,
+                  size: 24,
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 const Expanded(
                   child: Text(
                     'VisionVoice',
@@ -364,12 +392,15 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
                     ),
                   ),
                 ),
-                _TopButton(
-                  label: _language.label,
-                  icon: Icons.translate_rounded,
-                  onTap: _showLanguageSheet,
+                Flexible(
+                  flex: 0,
+                  child: _TopButton(
+                    label: _language.shortLabel,
+                    icon: Icons.translate_rounded,
+                    onTap: _showLanguageSheet,
+                  ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 _IconCircle(
                   icon:
                       _isTtsEnabled
@@ -440,7 +471,7 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
 
   Widget _buildBottomDock() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -461,7 +492,7 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
                 () => setState(() => _panelExpanded = !_panelExpanded),
             isSpeaking: _isSpeaking,
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
@@ -471,9 +502,9 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
                   onTap: _detectedText.isEmpty ? null : _reread,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               ScaleTransition(scale: _holdScale, child: _buildHoldButton()),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               Expanded(
                 child: _ActionButton(
                   icon: Icons.stop_rounded,
@@ -482,7 +513,7 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
                   onTap: _stopSpeech,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               _IconCircle(
                 icon:
                     _isTorchOn
@@ -508,8 +539,8 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
         onTapUp: (_) => _onHoldEnd(),
         onTapCancel: _onHoldEnd,
         child: Container(
-          width: 94,
-          height: 94,
+          width: 82,
+          height: 82,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             gradient: const LinearGradient(
@@ -558,12 +589,20 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
       context: context,
       backgroundColor: const Color(0xFF111622),
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (context) {
+        final sheetHeight = MediaQuery.sizeOf(context).height * 0.62;
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+          child: SizedBox(
+            height: sheetHeight,
+            child: ListView(
+              padding: EdgeInsets.fromLTRB(
+                14,
+                0,
+                14,
+                12 + MediaQuery.viewInsetsOf(context).bottom,
+              ),
+              physics: const BouncingScrollPhysics(),
               children: [
                 const Text(
                   'Recognition Language',

@@ -25,29 +25,34 @@ class DetectedTextPanel extends StatelessWidget {
     final hasText = text.trim().isNotEmpty;
     final preview =
         hasText ? text.trim() : 'Point the camera at text to begin.';
+    final isUrdu = language == RecognitionLanguage.urdu;
+    final textDirection =
+        isUrdu || _containsArabic(preview)
+            ? TextDirection.rtl
+            : TextDirection.ltr;
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(26),
+      borderRadius: BorderRadius.circular(22),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 260),
           curve: Curves.easeOut,
           width: double.infinity,
           constraints: BoxConstraints(
-            minHeight: 132,
-            maxHeight: isExpanded ? 330 : 168,
+            minHeight: 116,
+            maxHeight: isExpanded ? 260 : 154,
           ),
-          padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
           decoration: BoxDecoration(
-            color: const Color(0xFF101522).withValues(alpha: 0.78),
-            borderRadius: BorderRadius.circular(26),
+            color: const Color(0xFF101522).withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(22),
             border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.34),
-                blurRadius: 22,
-                offset: const Offset(0, 12),
+                blurRadius: 16,
+                offset: const Offset(0, 8),
               ),
             ],
           ),
@@ -64,7 +69,7 @@ class DetectedTextPanel extends StatelessWidget {
                       isSpeaking ? ScannerStatus.speaking.label : status.label,
                       style: const TextStyle(
                         color: Color(0xFFF6F9FF),
-                        fontSize: 18,
+                        fontSize: 16,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
@@ -96,10 +101,11 @@ class DetectedTextPanel extends StatelessWidget {
                   physics: const BouncingScrollPhysics(),
                   child: SelectableText(
                     preview,
-                    textDirection:
-                        _containsArabic(preview)
-                            ? TextDirection.rtl
-                            : TextDirection.ltr,
+                    textDirection: textDirection,
+                    textAlign:
+                        textDirection == TextDirection.rtl
+                            ? TextAlign.right
+                            : TextAlign.left,
                     style: TextStyle(
                       color:
                           hasText
