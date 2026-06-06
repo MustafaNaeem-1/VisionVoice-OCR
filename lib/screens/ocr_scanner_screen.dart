@@ -7,6 +7,7 @@ import 'package:vibration/vibration.dart';
 import '../models/recognition_language.dart';
 import '../services/camera_service.dart';
 import '../services/tts_service.dart';
+import '../services/urdu_ocr_service.dart';
 import '../widgets/detected_text_panel.dart';
 
 enum ScanMode { live, frozen }
@@ -22,6 +23,7 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
     with TickerProviderStateMixin {
   late CameraService _cameraService;
   late TtsService _ttsService;
+  final UrduOcrService _urduOcrService = UrduOcrService();
   late AnimationController _holdController;
   late Animation<double> _holdScale;
 
@@ -34,6 +36,7 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
   bool _isTtsEnabled = true;
   bool _isSpeaking = false;
   bool _isCapturing = false;
+  bool _isScanning = false;
   bool _isHolding = false;
   bool _isTorchOn = false;
   bool _panelExpanded = false;
@@ -94,6 +97,7 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
 
   void _onTextRecognized(String text, List<TextBlock> blocks) {
     if (!mounted || _mode == ScanMode.frozen) return;
+    if (_language == RecognitionLanguage.urdu) return;
 
     final trimmed = text.trim();
     setState(() {
@@ -115,24 +119,24 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
     await _ttsService.stop();
     await _ttsService.setLanguage(language);
     await _cameraService.setLanguage(language);
+    if (language == RecognitionLanguage.urdu) {
+      await _cameraService.stopStream();
+    } else if (_isInitialized) {
+      await _cameraService.resumeStream();
+    }
     if (!mounted) return;
     setState(() {
       _language = language;
       _detectedText = '';
-      _errorMessage =
-          language == RecognitionLanguage.urdu
-              ? 'Urdu speech is enabled. Urdu OCR needs an Arabic-script ML Kit model that this Flutter plugin does not expose.'
-              : '';
-      _status =
-          language == RecognitionLanguage.urdu
-              ? ScannerStatus.error
-              : ScannerStatus.idle;
+      _errorMessage = '';
+      _status = ScannerStatus.idle;
     });
   }
 
   Future<void> _onHoldStart() async {
-    if (!_isInitialized || _isCapturing) return;
+    if (!_isInitialized || _isScanning) return;
     _isHolding = true;
+    _isScanning = true;
     _holdController.forward();
     await _vibrate(duration: 70);
     await _ttsService.stop();
@@ -140,28 +144,64 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
 
     setState(() {
       _mode = ScanMode.frozen;
-      _status = ScannerStatus.scanning;
+      _status =
+          _language == RecognitionLanguage.urdu
+              ? ScannerStatus.readingUrdu
+              : ScannerStatus.scanning;
       _isCapturing = true;
       _errorMessage = '';
+      _detectedText = '';
     });
 
-    final RecognizedText? result = await _cameraService.captureAndRecognize(
-      language: _language,
-    );
-    if (!mounted) return;
+    String text = '';
+    bool hasOcrError = false;
+    try {
+      text =
+          _language == RecognitionLanguage.urdu
+              ? await _captureAndRecognizeUrdu()
+              : await _captureAndRecognizeEnglish();
+    } catch (error) {
+      hasOcrError = true;
+      text = '';
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Scan failed: $error';
+          _status = ScannerStatus.error;
+        });
+      }
+    }
 
-    final text = result?.text.trim() ?? '';
+    if (!mounted) return;
+    final displayText =
+        _language == RecognitionLanguage.urdu && text.isEmpty && !hasOcrError
+            ? 'No Urdu text found. Try holding the camera steady and scan again.'
+            : text;
     setState(() {
-      _detectedText = text;
+      _detectedText = displayText;
       _isCapturing = false;
+      _isScanning = false;
+      _mode = ScanMode.live;
       _status =
-          text.isEmpty ? ScannerStatus.noText : ScannerStatus.textDetected;
-      _panelExpanded = text.length > 120;
+          hasOcrError
+              ? ScannerStatus.error
+              : text.isEmpty
+              ? ScannerStatus.noText
+              : ScannerStatus.textDetected;
+      _panelExpanded = displayText.length > 120;
     });
 
     await _vibrate(duration: text.isEmpty ? 30 : 90);
-    if (_isTtsEnabled && text.isNotEmpty) {
-      await _ttsService.speakNow(text, language: _language);
+    try {
+      if (_isTtsEnabled && text.isNotEmpty) {
+        await _ttsService.speakNow(text, language: _language);
+      }
+    } catch (error) {
+      debugPrint('TTS failed after scan: $error');
+      if (mounted) setState(() => _isSpeaking = false);
+    } finally {
+      if (_language != RecognitionLanguage.urdu) {
+        await _cameraService.resumeStream();
+      }
     }
   }
 
@@ -169,13 +209,21 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
     if (!_isHolding) return;
     _isHolding = false;
     _holdController.reverse();
-    await Future.delayed(const Duration(milliseconds: 420));
-    if (!mounted) return;
-    setState(() {
-      _mode = ScanMode.live;
-      if (_status != ScannerStatus.error) _status = ScannerStatus.idle;
-    });
-    await _cameraService.resumeStream();
+  }
+
+  Future<String> _captureAndRecognizeEnglish() async {
+    final RecognizedText? result = await _cameraService.captureAndRecognize(
+      language: _language,
+    );
+    return result?.text.trim() ?? '';
+  }
+
+  Future<String> _captureAndRecognizeUrdu() async {
+    final controller = _cameraService.controller;
+    if (controller == null || !controller.value.isInitialized) return '';
+
+    final XFile image = await controller.takePicture();
+    return _urduOcrService.recognizeUrduFromImagePath(image.path);
   }
 
   Future<void> _toggleTts() async {
@@ -490,9 +538,9 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
       case RecognitionLanguage.english:
         return 'Latin OCR with en-US speech';
       case RecognitionLanguage.urdu:
-        return 'Urdu speech with ur-PK. OCR model unavailable in current ML Kit plugin.';
+        return 'Offline Urdu OCR with Tesseract trained data.';
       case RecognitionLanguage.auto:
-        return 'Live English OCR now; Urdu speech is used when Arabic-script text is present.';
+        return 'Keeps live OCR lightweight. Select Urdu manually for Tesseract.';
     }
   }
 }

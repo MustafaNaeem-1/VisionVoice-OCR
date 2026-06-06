@@ -39,6 +39,7 @@ enum ScannerStatus {
   initializing,
   idle,
   scanning,
+  readingUrdu,
   textDetected,
   speaking,
   noText,
@@ -54,6 +55,8 @@ extension ScannerStatusDetails on ScannerStatus {
         return 'Ready to scan';
       case ScannerStatus.scanning:
         return 'Scanning';
+      case ScannerStatus.readingUrdu:
+        return 'Reading Urdu text...';
       case ScannerStatus.textDetected:
         return 'Text detected';
       case ScannerStatus.speaking:
