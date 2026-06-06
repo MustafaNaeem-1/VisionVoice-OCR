@@ -29,6 +29,9 @@ class GoogleVisionUrduOcrService {
     try {
       debugPrint('Urdu online OCR started');
       debugPrint('Urdu online OCR image path: $imagePath');
+      debugPrint(
+        'Google Vision key present: ${googleVisionApiKey.isNotEmpty}, length: ${googleVisionApiKey.length}',
+      );
 
       if (googleVisionApiKey.isEmpty) {
         lastErrorMessage = missingApiKeyMessage;
