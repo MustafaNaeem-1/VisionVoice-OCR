@@ -3,8 +3,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:vibration/vibration.dart';
 import 'ocr_scanner_screen.dart';
 
-/// Handles camera + microphone permission requests then
-/// routes to [OCRScannerScreen].
 class PermissionScreen extends StatefulWidget {
   const PermissionScreen({super.key});
 
@@ -14,78 +12,61 @@ class PermissionScreen extends StatefulWidget {
 
 class _PermissionScreenState extends State<PermissionScreen>
     with SingleTickerProviderStateMixin {
-  late AnimationController _pulseController;
-  late Animation<double> _pulseAnim;
+  late AnimationController _controller;
+  late Animation<double> _fade;
 
   PermissionStatus _cameraStatus = PermissionStatus.denied;
-  PermissionStatus _micStatus = PermissionStatus.denied;
   bool _isRequesting = false;
 
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(
+    _controller = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 2),
-    )..repeat(reverse: true);
-    _pulseAnim = Tween(begin: 0.95, end: 1.05).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
-    );
-    _checkPermissions();
+      duration: const Duration(milliseconds: 700),
+    )..forward();
+    _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _checkPermission();
   }
 
-  Future<void> _checkPermissions() async {
-    final camera = await Permission.camera.status;
-    final mic = await Permission.microphone.status;
-    if (mounted) {
-      setState(() {
-        _cameraStatus = camera;
-        _micStatus = mic;
-      });
-      if (_cameraStatus.isGranted && _micStatus.isGranted) {
-        _navigateToScanner();
-      }
-    }
+  Future<void> _checkPermission() async {
+    final status = await Permission.camera.status;
+    if (!mounted) return;
+    setState(() => _cameraStatus = status);
+    if (status.isGranted) _navigateToScanner();
   }
 
-  Future<void> _requestPermissions() async {
+  Future<void> _requestCamera() async {
     setState(() => _isRequesting = true);
-
-    // Haptic feedback
-    if (await Vibration.hasVibrator() ?? false) {
-      Vibration.vibrate(duration: 50);
+    if (await Vibration.hasVibrator()) {
+      Vibration.vibrate(duration: 45);
     }
 
-    final statuses = await [
-      Permission.camera,
-      Permission.microphone,
-    ].request();
+    final status = await Permission.camera.request();
+    if (!mounted) return;
 
-    final cam = statuses[Permission.camera]!;
-    final mic = statuses[Permission.microphone]!;
+    setState(() {
+      _cameraStatus = status;
+      _isRequesting = false;
+    });
 
-    if (mounted) {
-      setState(() {
-        _cameraStatus = cam;
-        _micStatus = mic;
-        _isRequesting = false;
-      });
-
-      if (cam.isGranted && mic.isGranted) {
-        _navigateToScanner();
-      } else if (cam.isPermanentlyDenied || mic.isPermanentlyDenied) {
-        _showSettingsDialog();
-      }
+    if (status.isGranted) {
+      _navigateToScanner();
+    } else if (status.isPermanentlyDenied) {
+      _showSettingsDialog();
     }
   }
 
   void _navigateToScanner() {
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        pageBuilder: (_, a, b) => const OCRScannerScreen(),
-        transitionsBuilder: (_, a, b, child) =>
-            FadeTransition(opacity: a, child: child),
-        transitionDuration: const Duration(milliseconds: 500),
+        pageBuilder:
+            (context, animation, secondaryAnimation) =>
+                const OCRScannerScreen(),
+        transitionsBuilder:
+            (context, animation, secondaryAnimation, child) =>
+                FadeTransition(opacity: animation, child: child),
+        transitionDuration: const Duration(milliseconds: 420),
       ),
     );
   }
@@ -93,243 +74,207 @@ class _PermissionScreenState extends State<PermissionScreen>
   void _showSettingsDialog() {
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF13131A),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text(
-          'Permissions Required',
-          style: TextStyle(color: Color(0xFF00D4FF), fontWeight: FontWeight.w700),
-        ),
-        content: const Text(
-          'Camera and Microphone permissions are required for VisionVoice to work. '
-          'Please enable them in App Settings.',
-          style: TextStyle(color: Color(0xFFE8E8F0), fontSize: 16, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel',
-                style: TextStyle(color: Color(0xFFAAAAAC))),
+      builder:
+          (context) => AlertDialog(
+            backgroundColor: const Color(0xFF141824),
+            title: const Text('Camera access is blocked'),
+            content: const Text(
+              'Open app settings and allow camera access so VisionVoice can scan text on device.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Not now'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  openAppSettings();
+                },
+                child: const Text('Open Settings'),
+              ),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              openAppSettings();
-            },
-            child: const Text('Open Settings'),
-          ),
-        ],
-      ),
     );
   }
 
   @override
   void dispose() {
-    _pulseController.dispose();
+    _controller.dispose();
     super.dispose();
   }
 
-  Widget _permissionTile(String label, IconData icon, PermissionStatus status) {
-    final bool granted = status.isGranted;
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF13131A),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: granted
-              ? const Color(0xFF00D4FF).withOpacity(0.5)
-              : const Color(0xFF2A2A35),
-          width: 1.5,
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: granted
-                  ? const Color(0xFF00D4FF).withOpacity(0.15)
-                  : const Color(0xFF2A2A35),
-            ),
-            child: Icon(
-              icon,
-              color: granted
-                  ? const Color(0xFF00D4FF)
-                  : const Color(0xFF666680),
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
+  @override
+  Widget build(BuildContext context) {
+    final denied = _cameraStatus.isDenied || _cameraStatus.isPermanentlyDenied;
+
+    return Scaffold(
+      body: SafeArea(
+        child: FadeTransition(
+          opacity: _fade,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 28),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                const Spacer(),
+                _buildIcon(),
+                const SizedBox(height: 32),
                 Text(
-                  label,
-                  style: const TextStyle(
-                    color: Color(0xFFE8E8F0),
+                  'Camera access',
+                  style: Theme.of(context).textTheme.headlineLarge,
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'VisionVoice uses the camera to read printed text aloud. Scanning happens on your device, and microphone access is not required.',
+                  style: TextStyle(
+                    color: Color(0xFFC5CAD8),
                     fontSize: 17,
-                    fontWeight: FontWeight.w600,
+                    height: 1.55,
                   ),
                 ),
-                Text(
-                  granted ? 'Granted ✓' : 'Not granted',
-                  style: TextStyle(
-                    color: granted
-                        ? const Color(0xFF00D4FF)
-                        : const Color(0xFFAAAAAC),
-                    fontSize: 13,
+                const SizedBox(height: 28),
+                _buildInfoTile(
+                  icon: Icons.camera_alt_rounded,
+                  title: 'Camera',
+                  subtitle:
+                      _cameraStatus.isGranted
+                          ? 'Allowed'
+                          : 'Required for OCR scanning',
+                  active: _cameraStatus.isGranted,
+                ),
+                const SizedBox(height: 12),
+                _buildInfoTile(
+                  icon: Icons.mic_off_rounded,
+                  title: 'Microphone',
+                  subtitle: 'Not used. Speech output uses your device speaker.',
+                  active: false,
+                ),
+                if (denied) ...[
+                  const SizedBox(height: 18),
+                  Text(
+                    _cameraStatus.isPermanentlyDenied
+                        ? 'Permission is blocked. Use settings to turn it back on.'
+                        : 'Camera permission is needed before scanning can start.',
+                    style: const TextStyle(
+                      color: Color(0xFFFFB4B4),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+                const Spacer(),
+                FilledButton.icon(
+                  onPressed:
+                      _isRequesting
+                          ? null
+                          : (_cameraStatus.isPermanentlyDenied
+                              ? _showSettingsDialog
+                              : _requestCamera),
+                  icon:
+                      _isRequesting
+                          ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                          : const Icon(Icons.lock_open_rounded),
+                  label: Text(
+                    _cameraStatus.isPermanentlyDenied
+                        ? 'Open Settings'
+                        : 'Allow Camera Access',
+                  ),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(64),
+                    textStyle: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-          child: Column(
-            children: [
-              const Spacer(),
-
-              // Animated icon
-              ScaleTransition(
-                scale: _pulseAnim,
-                child: Container(
-                  width: 120,
-                  height: 120,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: const RadialGradient(
-                      colors: [Color(0xFF00D4FF), Color(0xFF7B2FFF)],
-                      center: Alignment.topLeft,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF00D4FF).withOpacity(0.4),
-                        blurRadius: 40,
-                        spreadRadius: 5,
-                      ),
-                    ],
-                  ),
-                  child: const Icon(Icons.visibility, size: 56, color: Colors.white),
-                ),
-              ),
-
-              const SizedBox(height: 36),
-              const Text(
-                'VisionVoice',
-                style: TextStyle(
-                  fontSize: 36,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFFE8E8F0),
-                  letterSpacing: 1,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Real-time OCR · Text to Speech',
-                style: TextStyle(
-                  color: Color(0xFF00D4FF),
-                  fontSize: 16,
-                  letterSpacing: 0.5,
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Point your camera at any text and let VisionVoice read it aloud for you.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Color(0xFFAAAAAC),
-                  fontSize: 15,
-                  height: 1.6,
-                ),
-              ),
-
-              const SizedBox(height: 40),
-
-              // Permission tiles
-              _permissionTile('Camera Access', Icons.camera_alt_rounded, _cameraStatus),
-              _permissionTile('Microphone Access', Icons.mic_rounded, _micStatus),
-
-              const Spacer(),
-
-              // Grant button
-              GestureDetector(
-                onTap: _isRequesting ? null : _requestPermissions,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: double.infinity,
-                  height: 64,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(20),
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF00D4FF), Color(0xFF7B2FFF)],
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF00D4FF).withOpacity(0.3),
-                        blurRadius: 20,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: _isRequesting
-                        ? const SizedBox(
-                            width: 28,
-                            height: 28,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2.5,
-                            ),
-                          )
-                        : Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.security_rounded,
-                                  color: Colors.white, size: 24),
-                              const SizedBox(width: 12),
-                              Text(
-                                (_cameraStatus.isGranted && _micStatus.isGranted)
-                                    ? 'Open Scanner'
-                                    : 'Grant Permissions',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 19,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
-                            ],
-                          ),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 16),
-              Text(
-                'Permissions are used only on-device.\nNo data is sent to any server.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: const Color(0xFFAAAAAC).withOpacity(0.7),
-                  fontSize: 12,
-                  height: 1.5,
-                ),
-              ),
-            ],
+  Widget _buildIcon() {
+    return Container(
+      width: 88,
+      height: 88,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: const LinearGradient(
+          colors: [Color(0xFF38D7FF), Color(0xFF7A6BFF)],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF38D7FF).withValues(alpha: 0.24),
+            blurRadius: 28,
+            offset: const Offset(0, 12),
           ),
+        ],
+      ),
+      child: const Icon(
+        Icons.visibility_rounded,
+        size: 42,
+        color: Colors.white,
+      ),
+    );
+  }
+
+  Widget _buildInfoTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool active,
+  }) {
+    return Semantics(
+      label: '$title. $subtitle',
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: const Color(0xFF111622),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: active ? const Color(0xFF55E6A5) : const Color(0xFF263044),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              color: active ? const Color(0xFF55E6A5) : const Color(0xFF8D96A8),
+              size: 28,
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Color(0xFFF4F7FB),
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: Color(0xFFAEB6C6),
+                      fontSize: 14,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

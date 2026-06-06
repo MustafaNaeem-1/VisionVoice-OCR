@@ -1,24 +1,19 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:vibration/vibration.dart';
+import '../models/recognition_language.dart';
 import '../services/camera_service.dart';
 import '../services/tts_service.dart';
-import '../widgets/text_overlay_painter.dart';
-import '../widgets/scan_mode_indicator.dart';
 import '../widgets/detected_text_panel.dart';
+import '../widgets/scan_mode_indicator.dart';
+import '../widgets/text_overlay_painter.dart';
 
 enum ScanMode { live, frozen }
 
-/// The main OCR + TTS scanning screen.
-///
-/// Features:
-///  • Live camera preview with bounding-box overlay
-///  • 2-3 fps debounced OCR via [CameraService]
-///  • Smart TTS that only speaks on text changes
-///  • "Hold to Scan" button for high-accuracy still-frame capture
-///  • Haptic feedback, large tappable areas, high-contrast accessible UI
 class OCRScannerScreen extends StatefulWidget {
   const OCRScannerScreen({super.key});
 
@@ -28,30 +23,26 @@ class OCRScannerScreen extends StatefulWidget {
 
 class _OCRScannerScreenState extends State<OCRScannerScreen>
     with TickerProviderStateMixin {
-  // ── Services ────────────────────────────────────────────────────────────────
   late CameraService _cameraService;
-  final TtsService _ttsService = TtsService();
+  late TtsService _ttsService;
+  late AnimationController _scanLineController;
+  late AnimationController _holdController;
+  late Animation<double> _scanLine;
+  late Animation<double> _holdScale;
 
-  // ── State ────────────────────────────────────────────────────────────────────
+  RecognitionLanguage _language = RecognitionLanguage.english;
+  ScannerStatus _status = ScannerStatus.initializing;
   ScanMode _mode = ScanMode.live;
   String _detectedText = '';
+  String _errorMessage = '';
   List<TextBlock> _textBlocks = [];
   bool _isInitialized = false;
   bool _isTtsEnabled = true;
-  bool _isHolding = false;
+  bool _isSpeaking = false;
   bool _isCapturing = false;
-  String _statusMessage = 'Initializing camera…';
-  String _errorMessage = '';
-
-  // ── Animation Controllers ────────────────────────────────────────────────────
-  late AnimationController _scanLineController;
-  late Animation<double> _scanLineAnim;
-  late AnimationController _holdButtonController;
-  late Animation<double> _holdScale;
-  late AnimationController _pulseController;
-  late Animation<double> _pulseOpacity;
-
-  // ── Lifecycle ────────────────────────────────────────────────────────────────
+  bool _isHolding = false;
+  bool _isTorchOn = false;
+  bool _panelExpanded = false;
 
   @override
   void initState() {
@@ -61,258 +52,214 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
   }
 
   void _initAnimations() {
-    // Scanning line animation
     _scanLineController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 2),
+      duration: const Duration(milliseconds: 1900),
     )..repeat(reverse: true);
-    _scanLineAnim = Tween(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _scanLineController, curve: Curves.easeInOut),
+    _scanLine = CurvedAnimation(
+      parent: _scanLineController,
+      curve: Curves.easeInOut,
     );
 
-    // Hold button scale
-    _holdButtonController = AnimationController(
+    _holdController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 150),
+      duration: const Duration(milliseconds: 130),
     );
-    _holdScale = Tween(begin: 1.0, end: 0.92).animate(
-      CurvedAnimation(parent: _holdButtonController, curve: Curves.easeIn),
-    );
-
-    // Pulse for active TTS indicator
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 800),
-    )..repeat(reverse: true);
-    _pulseOpacity = Tween(begin: 0.4, end: 1.0).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
-    );
+    _holdScale = Tween(
+      begin: 1.0,
+      end: 0.94,
+    ).animate(CurvedAnimation(parent: _holdController, curve: Curves.easeOut));
   }
 
   Future<void> _initServices() async {
-    await _ttsService.initialize();
-
+    _ttsService = TtsService(
+      onStateChanged: (speaking) {
+        if (!mounted) return;
+        setState(() {
+          _isSpeaking = speaking;
+          if (speaking) _status = ScannerStatus.speaking;
+        });
+      },
+    );
     _cameraService = CameraService(
       onTextRecognized: _onTextRecognized,
       onError: (error) {
-        if (mounted) setState(() => _errorMessage = error);
+        if (!mounted) return;
+        setState(() {
+          _errorMessage = error;
+          _status = ScannerStatus.error;
+        });
       },
     );
 
+    await _ttsService.initialize();
     await _cameraService.initialize();
-
-    if (_cameraService.isInitialized) {
-      await _cameraService.startStream();
-      if (mounted) {
-        setState(() {
-          _isInitialized = true;
-          _statusMessage = 'Point camera at text';
-        });
-      }
-    } else {
-      if (mounted) {
-        setState(() => _statusMessage = 'Camera initialization failed');
-      }
+    if (!_cameraService.isInitialized) {
+      if (mounted) setState(() => _status = ScannerStatus.error);
+      return;
     }
-  }
 
-  // ── OCR Callback ─────────────────────────────────────────────────────────────
+    await _cameraService.startStream();
+    if (!mounted) return;
+    setState(() {
+      _isInitialized = true;
+      _status = ScannerStatus.idle;
+    });
+  }
 
   void _onTextRecognized(String text, List<TextBlock> blocks) {
-    if (!mounted) return;
-    if (_mode == ScanMode.frozen) return; // Don't update while frozen
+    if (!mounted || _mode == ScanMode.frozen) return;
 
+    final trimmed = text.trim();
     setState(() {
-      _detectedText = text;
+      _detectedText = trimmed;
       _textBlocks = blocks;
-      _statusMessage = text.isEmpty ? 'No text detected' : 'Text detected';
+      if (_status != ScannerStatus.error || trimmed.isNotEmpty) {
+        _status =
+            trimmed.isEmpty ? ScannerStatus.noText : ScannerStatus.textDetected;
+      }
     });
 
-    // Smart TTS: speak only if text changed
-    if (_isTtsEnabled && text.isNotEmpty) {
-      _ttsService.smartSpeak(text);
+    if (_isTtsEnabled && trimmed.isNotEmpty) {
+      _ttsService.smartSpeak(trimmed, language: _language);
     }
   }
 
-  // ── Hold to Scan ─────────────────────────────────────────────────────────────
+  Future<void> _changeLanguage(RecognitionLanguage language) async {
+    if (_language == language) return;
+    await _vibrate(duration: 45);
+    await _ttsService.stop();
+    await _ttsService.setLanguage(language);
+    await _cameraService.setLanguage(language);
+    if (!mounted) return;
+    setState(() {
+      _language = language;
+      _detectedText = '';
+      _textBlocks = [];
+      _errorMessage =
+          language == RecognitionLanguage.urdu
+              ? 'Urdu speech is enabled. Urdu OCR needs an Arabic-script ML Kit model that this Flutter plugin does not expose.'
+              : '';
+      _status =
+          language == RecognitionLanguage.urdu
+              ? ScannerStatus.error
+              : ScannerStatus.idle;
+    });
+  }
 
   Future<void> _onHoldStart() async {
-    if (_isCapturing) return;
+    if (!_isInitialized || _isCapturing) return;
     _isHolding = true;
-    _holdButtonController.forward();
-
-    // Haptic feedback
-    _vibrate(duration: 80);
-
-    // Freeze live updates and stop TTS
+    _holdController.forward();
+    await _vibrate(duration: 70);
     await _ttsService.stop();
     await _cameraService.stopStream();
 
     setState(() {
       _mode = ScanMode.frozen;
-      _statusMessage = 'Scanning…';
+      _status = ScannerStatus.scanning;
       _isCapturing = true;
+      _errorMessage = '';
     });
 
-    // Capture high-res still and run OCR
-    final RecognizedText? result = await _cameraService.captureAndRecognize();
+    final RecognizedText? result = await _cameraService.captureAndRecognize(
+      language: _language,
+    );
+    if (!mounted) return;
 
-    if (result != null && mounted) {
-      final String fullText = result.text;
-      setState(() {
-        _detectedText = fullText;
-        _textBlocks = result.blocks;
-        _statusMessage = fullText.isEmpty
-            ? 'No text found in frame'
-            : 'Hold released – reading aloud…';
-        _isCapturing = false;
-      });
+    final text = result?.text.trim() ?? '';
+    setState(() {
+      _detectedText = text;
+      _textBlocks = result?.blocks ?? [];
+      _isCapturing = false;
+      _status =
+          text.isEmpty ? ScannerStatus.noText : ScannerStatus.textDetected;
+      _panelExpanded = text.length > 120;
+    });
 
-      // Force-speak the full captured text
-      if (_isTtsEnabled && fullText.isNotEmpty) {
-        await _ttsService.speakNow(fullText);
-      }
-    } else if (mounted) {
-      setState(() {
-        _statusMessage = 'Capture failed – try again';
-        _isCapturing = false;
-      });
+    await _vibrate(duration: text.isEmpty ? 30 : 90);
+    if (_isTtsEnabled && text.isNotEmpty) {
+      await _ttsService.speakNow(text, language: _language);
     }
   }
 
   Future<void> _onHoldEnd() async {
     if (!_isHolding) return;
     _isHolding = false;
-    _holdButtonController.reverse();
-
-    // Resume live scanning after a short delay
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    if (mounted) {
-      setState(() {
-        _mode = ScanMode.live;
-        _statusMessage = 'Point camera at text';
-      });
-      await _cameraService.resumeStream();
-    }
+    _holdController.reverse();
+    await Future.delayed(const Duration(milliseconds: 420));
+    if (!mounted) return;
+    setState(() {
+      _mode = ScanMode.live;
+      if (_status != ScannerStatus.error) _status = ScannerStatus.idle;
+    });
+    await _cameraService.resumeStream();
   }
 
-  // ── TTS Toggle ───────────────────────────────────────────────────────────────
-
   Future<void> _toggleTts() async {
-    _vibrate(duration: 40);
+    await _vibrate(duration: 35);
     setState(() => _isTtsEnabled = !_isTtsEnabled);
     if (!_isTtsEnabled) await _ttsService.stop();
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
+  Future<void> _toggleTorch() async {
+    await _vibrate(duration: 35);
+    final enabled = await _cameraService.toggleTorch();
+    if (mounted) setState(() => _isTorchOn = enabled);
+  }
+
+  Future<void> _stopSpeech() async {
+    await _vibrate(duration: 45);
+    await _ttsService.stop();
+    if (!mounted) return;
+    setState(() {
+      _isSpeaking = false;
+      if (_status == ScannerStatus.speaking) _status = ScannerStatus.idle;
+    });
+  }
+
+  Future<void> _reread() async {
+    if (_detectedText.isEmpty) {
+      await _vibrate(duration: 25);
+      setState(() => _status = ScannerStatus.noText);
+      return;
+    }
+    await _vibrate(duration: 45);
+    await _ttsService.speakNow(_detectedText, language: _language);
+  }
 
   Future<void> _vibrate({int duration = 50}) async {
-    if (await Vibration.hasVibrator() ?? false) {
+    HapticFeedback.selectionClick();
+    if (await Vibration.hasVibrator()) {
       Vibration.vibrate(duration: duration);
     }
   }
 
   @override
-  Future<void> dispose() async {
+  void dispose() {
     _scanLineController.dispose();
-    _holdButtonController.dispose();
-    _pulseController.dispose();
-    await _ttsService.dispose();
-    await _cameraService.dispose();
+    _holdController.dispose();
+    unawaited(_ttsService.dispose());
+    unawaited(_cameraService.dispose());
     super.dispose();
   }
-
-  // ── Build ────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0F),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildAppBar(),
-            Expanded(child: _buildCameraArea()),
-            _buildBottomPanel(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── App Bar ──────────────────────────────────────────────────────────────────
-
-  Widget _buildAppBar() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
+      backgroundColor: const Color(0xFF080A12),
+      body: Stack(
+        fit: StackFit.expand,
         children: [
-          // Logo
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: const LinearGradient(
-                colors: [Color(0xFF00D4FF), Color(0xFF7B2FFF)],
-              ),
-            ),
-            child: const Icon(Icons.visibility_rounded,
-                size: 22, color: Colors.white),
-          ),
-          const SizedBox(width: 12),
-          const Text(
-            'VisionVoice',
-            style: TextStyle(
-              color: Color(0xFFE8E8F0),
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.5,
-            ),
-          ),
-          const Spacer(),
-
-          // Mode indicator
-          ScanModeIndicator(mode: _mode),
-
-          const SizedBox(width: 12),
-
-          // TTS toggle button
-          GestureDetector(
-            onTap: _toggleTts,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: _isTtsEnabled
-                    ? const Color(0xFF00D4FF).withOpacity(0.15)
-                    : const Color(0xFF2A2A35),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: _isTtsEnabled
-                      ? const Color(0xFF00D4FF).withOpacity(0.5)
-                      : const Color(0xFF3A3A45),
-                  width: 1.5,
-                ),
-              ),
-              child: AnimatedBuilder(
-                animation: _pulseController,
-                builder: (_, child) => Opacity(
-                  opacity: _isTtsEnabled
-                      ? _pulseOpacity.value
-                      : 1.0,
-                  child: child,
-                ),
-                child: Icon(
-                  _isTtsEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
-                  color: _isTtsEnabled
-                      ? const Color(0xFF00D4FF)
-                      : const Color(0xFF666680),
-                  size: 24,
-                ),
-              ),
+          _buildCameraLayer(),
+          _buildScrims(),
+          if (_isInitialized && _textBlocks.isNotEmpty) _buildTextOverlay(),
+          if (_isInitialized) _buildScannerFrame(),
+          SafeArea(child: _buildTopBar()),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: _buildBottomDock(),
             ),
           ),
         ],
@@ -320,151 +267,43 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
     );
   }
 
-  // ── Camera Preview + Overlay ─────────────────────────────────────────────────
-
-  Widget _buildCameraArea() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: _mode == ScanMode.frozen
-                  ? const Color(0xFFFFD700).withOpacity(0.7)
-                  : const Color(0xFF00D4FF).withOpacity(0.3),
-              width: 2,
-            ),
-          ),
-          child: Stack(
+  Widget _buildCameraLayer() {
+    if (!_isInitialized || _cameraService.controller == null) {
+      return Container(
+        color: const Color(0xFF0B1020),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              // Camera preview
-              if (_isInitialized &&
-                  _cameraService.controller != null)
-                _buildCameraPreview()
-              else
-                _buildCameraPlaceholder(),
-
-              // Bounding box overlay
-              if (_isInitialized && _textBlocks.isNotEmpty)
-                _buildTextOverlay(),
-
-              // Animated scan line (live mode only)
-              if (_mode == ScanMode.live && _isInitialized)
-                _buildScanLine(),
-
-              // Frozen frame indicator
-              if (_mode == ScanMode.frozen)
-                _buildFrozenOverlay(),
-
-              // Status chip at bottom of camera
-              Positioned(
-                bottom: 16,
-                left: 0,
-                right: 0,
-                child: Center(child: _buildStatusChip()),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCameraPreview() {
-    final controller = _cameraService.controller!;
-    final double aspectRatio = controller.value.aspectRatio;
-
-    return AspectRatio(
-      aspectRatio: aspectRatio,
-      child: CameraPreview(controller),
-    );
-  }
-
-  Widget _buildCameraPlaceholder() {
-    return AspectRatio(
-      aspectRatio: 3 / 4,
-      child: Container(
-        color: const Color(0xFF0D0D1A),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (_errorMessage.isNotEmpty) ...[
-              const Icon(Icons.error_outline_rounded,
-                  color: Color(0xFFFF5F6D), size: 56),
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Text(
-                  _errorMessage,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Color(0xFFFF5F6D), fontSize: 15),
-                ),
-              ),
-            ] else ...[
-              const CircularProgressIndicator(
-                color: Color(0xFF00D4FF),
-                strokeWidth: 2.5,
-              ),
-              const SizedBox(height: 16),
+              const CircularProgressIndicator(color: Color(0xFF38D7FF)),
+              const SizedBox(height: 18),
               Text(
-                _statusMessage,
-                style: const TextStyle(
-                    color: Color(0xFFAAAAAC), fontSize: 14),
+                _errorMessage.isEmpty ? _status.label : _errorMessage,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Color(0xFFDDE7F6), fontSize: 16),
               ),
             ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTextOverlay() {
-    final controller = _cameraService.controller!;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return CustomPaint(
-          size: Size(constraints.maxWidth, constraints.maxHeight),
-          painter: TextOverlayPainter(
-            blocks: _textBlocks,
-            previewSize: Size(
-              controller.value.previewSize?.width ?? 0,
-              controller.value.previewSize?.height ?? 0,
-            ),
-            isFrozen: _mode == ScanMode.frozen,
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    }
 
-  Widget _buildScanLine() {
-    return Positioned.fill(
-      child: AnimatedBuilder(
-        animation: _scanLineAnim,
-        builder: (_, _) {
-          return Align(
-            alignment: Alignment(0.0, -1.0 + (_scanLineAnim.value * 2.0)),
-            child: Container(
-              height: 2,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Colors.transparent,
-                    const Color(0xFF00D4FF).withOpacity(0.8),
-                    Colors.transparent,
-                  ],
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF00D4FF).withOpacity(0.5),
-                    blurRadius: 6,
-                    spreadRadius: 2,
-                  ),
-                ],
+    final controller = _cameraService.controller!;
+    final previewSize = controller.value.previewSize;
+    if (previewSize == null) return CameraPreview(controller);
+
+    return ClipRect(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return OverflowBox(
+            maxWidth: constraints.maxWidth,
+            maxHeight: constraints.maxHeight,
+            child: FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: previewSize.height,
+                height: previewSize.width,
+                child: CameraPreview(controller),
               ),
             ),
           );
@@ -473,193 +312,216 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
     );
   }
 
-  Widget _buildFrozenOverlay() {
-    return Positioned.fill(
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.25),
-          border: Border.all(color: const Color(0xFFFFD700), width: 2),
-          borderRadius: BorderRadius.circular(22),
+  Widget _buildScrims() {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.black.withValues(alpha: 0.70),
+            Colors.black.withValues(alpha: 0.10),
+            Colors.black.withValues(alpha: 0.20),
+            Colors.black.withValues(alpha: 0.86),
+          ],
+          stops: const [0.0, 0.26, 0.56, 1.0],
         ),
-        child: const Align(
-          alignment: Alignment.topRight,
-          child: Padding(
-            padding: EdgeInsets.all(12),
-            child: Icon(Icons.lock_rounded,
-                color: Color(0xFFFFD700), size: 24),
+      ),
+    );
+  }
+
+  Widget _buildTopBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 64),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0B1020).withValues(alpha: 0.62),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.visibility_rounded,
+                  color: Color(0xFF38D7FF),
+                  size: 28,
+                ),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'VisionVoice',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Color(0xFFF6F9FF),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                _TopButton(
+                  label: _language.label,
+                  icon: Icons.translate_rounded,
+                  onTap: _showLanguageSheet,
+                ),
+                const SizedBox(width: 8),
+                _IconCircle(
+                  icon:
+                      _isTtsEnabled
+                          ? Icons.volume_up_rounded
+                          : Icons.volume_off_rounded,
+                  label: _isTtsEnabled ? 'Sound on' : 'Sound off',
+                  active: _isTtsEnabled,
+                  onTap: _toggleTts,
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildStatusChip() {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.7),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: _mode == ScanMode.frozen
-              ? const Color(0xFFFFD700).withOpacity(0.5)
-              : const Color(0xFF00D4FF).withOpacity(0.3),
-          width: 1,
+  Widget _buildTextOverlay() {
+    final controller = _cameraService.controller!;
+    return CustomPaint(
+      painter: TextOverlayPainter(
+        blocks: _textBlocks,
+        previewSize: Size(
+          controller.value.previewSize?.width ?? 0,
+          controller.value.previewSize?.height ?? 0,
+        ),
+        isFrozen: _mode == ScanMode.frozen,
+      ),
+    );
+  }
+
+  Widget _buildScannerFrame() {
+    return IgnorePointer(
+      child: Center(
+        child: FractionallySizedBox(
+          widthFactor: 0.82,
+          heightFactor: 0.48,
+          child: Stack(
+            children: [
+              CustomPaint(painter: _CornerGuidePainter()),
+              if (_mode == ScanMode.live)
+                AnimatedBuilder(
+                  animation: _scanLine,
+                  builder: (context, _) {
+                    return Align(
+                      alignment: Alignment(0, -1 + (_scanLine.value * 2)),
+                      child: Container(
+                        height: 2,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.transparent,
+                              const Color(0xFF38D7FF).withValues(alpha: 0.85),
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+            ],
+          ),
         ),
       ),
-      child: Row(
+    );
+  }
+
+  Widget _buildBottomDock() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _mode == ScanMode.frozen
-                  ? const Color(0xFFFFD700)
-                  : (_detectedText.isNotEmpty
-                      ? const Color(0xFF00FF88)
-                      : const Color(0xFF666680)),
+          if (_errorMessage.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: ScanModeIndicator(status: _status, language: _language),
             ),
+          DetectedTextPanel(
+            text:
+                _errorMessage.isNotEmpty && _detectedText.isEmpty
+                    ? _errorMessage
+                    : _detectedText,
+            status: _status,
+            language: _language,
+            isExpanded: _panelExpanded,
+            onToggleExpanded:
+                () => setState(() => _panelExpanded = !_panelExpanded),
+            isSpeaking: _isSpeaking,
           ),
-          const SizedBox(width: 8),
-          Text(
-            _statusMessage,
-            style: const TextStyle(
-              color: Color(0xFFE8E8F0),
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-            ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _ActionButton(
+                  icon: Icons.replay_rounded,
+                  label: 'Re-read',
+                  onTap: _detectedText.isEmpty ? null : _reread,
+                ),
+              ),
+              const SizedBox(width: 12),
+              ScaleTransition(scale: _holdScale, child: _buildHoldButton()),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _ActionButton(
+                  icon: Icons.stop_rounded,
+                  label: 'Stop',
+                  danger: true,
+                  onTap: _stopSpeech,
+                ),
+              ),
+              const SizedBox(width: 12),
+              _IconCircle(
+                icon:
+                    _isTorchOn
+                        ? Icons.flash_on_rounded
+                        : Icons.flash_off_rounded,
+                label: _isTorchOn ? 'Flash on' : 'Flash off',
+                active: _isTorchOn,
+                onTap: _isInitialized ? _toggleTorch : null,
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  // ── Bottom Panel ─────────────────────────────────────────────────────────────
-
-  Widget _buildBottomPanel() {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Detected text panel
-        DetectedTextPanel(
-          text: _detectedText,
-          isEmpty: _detectedText.isEmpty,
-        ),
-
-        const SizedBox(height: 16),
-
-        // Control bar
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-          child: Row(
-            children: [
-              // Re-read last text button
-              Expanded(
-                child: _buildIconButton(
-                  icon: Icons.replay_rounded,
-                  label: 'Re-read',
-                  onTap: () {
-                    _vibrate(duration: 40);
-                    if (_detectedText.isNotEmpty) {
-                      _ttsService.speakNow(_detectedText);
-                    }
-                  },
-                ),
-              ),
-
-              const SizedBox(width: 16),
-
-              // Hold to Scan (center, larger)
-              _buildHoldToScanButton(),
-
-              const SizedBox(width: 16),
-
-              // Stop speech button
-              Expanded(
-                child: _buildIconButton(
-                  icon: Icons.stop_circle_rounded,
-                  label: 'Stop',
-                  onTap: () {
-                    _vibrate(duration: 40);
-                    _ttsService.stop();
-                  },
-                  isDestructive: true,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildIconButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    bool isDestructive = false,
-  }) {
-    final Color color = isDestructive
-        ? const Color(0xFFFF5F6D)
-        : const Color(0xFF00D4FF);
-
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        height: 70,
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: color.withOpacity(0.3), width: 1.5),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 26),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                color: color,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHoldToScanButton() {
-    return GestureDetector(
-      onTapDown: (_) => _onHoldStart(),
-      onTapUp: (_) => _onHoldEnd(),
-      onTapCancel: _onHoldEnd,
-      child: ScaleTransition(
-        scale: _holdScale,
+  Widget _buildHoldButton() {
+    return Semantics(
+      button: true,
+      label: _isCapturing ? 'Scanning' : 'Hold to scan',
+      child: GestureDetector(
+        onTapDown: (_) => _onHoldStart(),
+        onTapUp: (_) => _onHoldEnd(),
+        onTapCancel: _onHoldEnd,
         child: Container(
-          width: 96,
-          height: 96,
+          width: 94,
+          height: 94,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            gradient: LinearGradient(
+            gradient: const LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: _isCapturing
-                  ? [const Color(0xFFFFD700), const Color(0xFFFF8C00)]
-                  : [const Color(0xFF00D4FF), const Color(0xFF7B2FFF)],
+              colors: [Color(0xFF38D7FF), Color(0xFF7A6BFF)],
             ),
             boxShadow: [
               BoxShadow(
-                color: (_isCapturing
-                    ? const Color(0xFFFFD700)
-                    : const Color(0xFF00D4FF)).withOpacity(0.5),
+                color: const Color(0xFF38D7FF).withValues(alpha: 0.34),
                 blurRadius: 24,
-                spreadRadius: 4,
+                offset: const Offset(0, 12),
               ),
             ],
           ),
@@ -669,19 +531,17 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
               Icon(
                 _isCapturing
                     ? Icons.hourglass_top_rounded
-                    : Icons.touch_app_rounded,
+                    : Icons.center_focus_strong_rounded,
                 color: Colors.white,
-                size: 32,
+                size: 31,
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 4),
               Text(
-                _isCapturing ? 'Reading…' : 'Hold\nScan',
-                textAlign: TextAlign.center,
+                _isCapturing ? 'Scan' : 'Hold',
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  height: 1.2,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
             ],
@@ -690,4 +550,281 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
       ),
     );
   }
+
+  Future<void> _showLanguageSheet() async {
+    await _vibrate(duration: 25);
+    if (!mounted) return;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF111622),
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Recognition Language',
+                  style: TextStyle(
+                    color: Color(0xFFF6F9FF),
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                for (final option in RecognitionLanguage.values)
+                  _LanguageOption(
+                    language: option,
+                    selected: option == _language,
+                    subtitle: _subtitleForLanguage(option),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _changeLanguage(option);
+                    },
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _subtitleForLanguage(RecognitionLanguage language) {
+    switch (language) {
+      case RecognitionLanguage.english:
+        return 'Latin OCR with en-US speech';
+      case RecognitionLanguage.urdu:
+        return 'Urdu speech with ur-PK. OCR model unavailable in current ML Kit plugin.';
+      case RecognitionLanguage.auto:
+        return 'Live English OCR now; Urdu speech is used when Arabic-script text is present.';
+    }
+  }
+}
+
+class _TopButton extends StatelessWidget {
+  const _TopButton({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Language selector, $label',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: const Color(0xFFF6F9FF), size: 20),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Color(0xFFF6F9FF),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _IconCircle extends StatelessWidget {
+  const _IconCircle({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = active ? const Color(0xFF38D7FF) : const Color(0xFFDDE7F6);
+    return Semantics(
+      button: true,
+      label: label,
+      child: IconButton(
+        onPressed: onTap,
+        tooltip: label,
+        icon: Icon(icon, color: color),
+        style: IconButton.styleFrom(
+          minimumSize: const Size(52, 52),
+          backgroundColor: Colors.white.withValues(alpha: active ? 0.13 : 0.08),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.danger = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = danger ? const Color(0xFFFF8A96) : const Color(0xFFDDE7F6);
+    return Semantics(
+      button: true,
+      label: label,
+      child: FilledButton(
+        onPressed: onTap,
+        style: FilledButton.styleFrom(
+          backgroundColor: Colors.white.withValues(alpha: 0.10),
+          foregroundColor: color,
+          minimumSize: const Size(72, 62),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 24),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LanguageOption extends StatelessWidget {
+  const _LanguageOption({
+    required this.language,
+    required this.selected,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final RecognitionLanguage language;
+  final bool selected;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: ListTile(
+        onTap: onTap,
+        selected: selected,
+        minVerticalPadding: 14,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        tileColor: const Color(0xFF1A2232),
+        selectedTileColor: const Color(0xFF20324A),
+        leading: CircleAvatar(
+          backgroundColor:
+              selected ? const Color(0xFF38D7FF) : const Color(0xFF2A3548),
+          child: Text(
+            language.shortLabel,
+            style: TextStyle(
+              color:
+                  selected ? const Color(0xFF07111E) : const Color(0xFFDDE7F6),
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        title: Text(
+          language.label,
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+        ),
+        subtitle: Text(subtitle),
+        trailing:
+            selected
+                ? const Icon(
+                  Icons.check_circle_rounded,
+                  color: Color(0xFF55E6A5),
+                )
+                : null,
+      ),
+    );
+  }
+}
+
+class _CornerGuidePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint =
+        Paint()
+          ..color = const Color(0xFFE8F8FF).withValues(alpha: 0.68)
+          ..strokeWidth = 3
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round;
+    const corner = 34.0;
+    const inset = 2.0;
+
+    void drawCorner(Offset a, Offset b, Offset c) {
+      canvas.drawLine(a, b, paint);
+      canvas.drawLine(a, c, paint);
+    }
+
+    drawCorner(
+      const Offset(inset, inset),
+      const Offset(corner, inset),
+      const Offset(inset, corner),
+    );
+    drawCorner(
+      Offset(size.width - inset, inset),
+      Offset(size.width - corner, inset),
+      Offset(size.width - inset, corner),
+    );
+    drawCorner(
+      Offset(inset, size.height - inset),
+      Offset(corner, size.height - inset),
+      Offset(inset, size.height - corner),
+    );
+    drawCorner(
+      Offset(size.width - inset, size.height - inset),
+      Offset(size.width - corner, size.height - inset),
+      Offset(size.width - inset, size.height - corner),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

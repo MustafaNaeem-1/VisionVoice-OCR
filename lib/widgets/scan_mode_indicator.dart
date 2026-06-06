@@ -1,41 +1,47 @@
 import 'package:flutter/material.dart';
-import '../screens/ocr_scanner_screen.dart';
+import '../models/recognition_language.dart';
 
-/// Small animated pill that shows the current [ScanMode].
 class ScanModeIndicator extends StatelessWidget {
-  const ScanModeIndicator({super.key, required this.mode});
+  const ScanModeIndicator({
+    super.key,
+    required this.status,
+    required this.language,
+  });
 
-  final ScanMode mode;
+  final ScannerStatus status;
+  final RecognitionLanguage language;
 
   @override
   Widget build(BuildContext context) {
-    final bool isLive = mode == ScanMode.live;
-    final Color color =
-        isLive ? const Color(0xFF00D4FF) : const Color(0xFFFFD700);
-    final String label = isLive ? 'LIVE' : 'FROZEN';
-    final IconData icon =
-        isLive ? Icons.fiber_manual_record : Icons.lock_rounded;
+    final color = switch (status) {
+      ScannerStatus.textDetected => const Color(0xFF55E6A5),
+      ScannerStatus.speaking => const Color(0xFF38D7FF),
+      ScannerStatus.error => const Color(0xFFFF6B7A),
+      _ => const Color(0xFFB7C0D3),
+    };
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.5), width: 1.5),
+        color: Colors.black.withValues(alpha: 0.28),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: color, size: 12),
-          const SizedBox(width: 6),
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+          ),
+          const SizedBox(width: 8),
           Text(
-            label,
-            style: TextStyle(
-              color: color,
+            '${language.shortLabel}  ${status.label}',
+            style: const TextStyle(
+              color: Color(0xFFF6F9FF),
               fontSize: 12,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ],

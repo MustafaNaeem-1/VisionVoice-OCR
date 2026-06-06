@@ -1,7 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'permission_screen.dart';
+import 'platform_landing_screen.dart';
 
-/// Animated splash screen that transitions to [PermissionScreen] after 2.5 s.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -10,176 +10,115 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen>
-    with TickerProviderStateMixin {
-  late AnimationController _logoController;
-  late AnimationController _textController;
-  late Animation<double> _logoScale;
-  late Animation<double> _logoOpacity;
-  late Animation<double> _textOpacity;
-  late Animation<Offset> _textSlide;
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _fade;
+  late Animation<double> _scale;
+  Timer? _navigationTimer;
 
   @override
   void initState() {
     super.initState();
-
-    _logoController = AnimationController(
+    _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
-    );
-    _textController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    );
-
-    _logoScale = Tween(begin: 0.4, end: 1.0).animate(
-      CurvedAnimation(parent: _logoController, curve: Curves.elasticOut),
-    );
-    _logoOpacity = Tween(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _logoController, curve: const Interval(0.0, 0.5)),
-    );
-    _textOpacity = Tween(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _textController, curve: Curves.easeOut),
-    );
-    _textSlide = Tween(
-      begin: const Offset(0, 0.3),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(parent: _textController, curve: Curves.easeOut),
-    );
-
-    _runAnimations();
+    )..forward();
+    _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _scale = Tween(
+      begin: 0.92,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
+    _continue();
   }
 
-  Future<void> _runAnimations() async {
-    await Future.delayed(const Duration(milliseconds: 200));
-    _logoController.forward();
-    await Future.delayed(const Duration(milliseconds: 600));
-    _textController.forward();
-    await Future.delayed(const Duration(milliseconds: 1400));
-    if (mounted) {
+  void _continue() {
+    _navigationTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (!mounted) return;
       Navigator.of(context).pushReplacement(
         PageRouteBuilder(
-          pageBuilder: (_, a, b) => const PermissionScreen(),
-          transitionsBuilder: (_, a, b, child) =>
-              FadeTransition(opacity: a, child: child),
-          transitionDuration: const Duration(milliseconds: 600),
+          pageBuilder:
+              (context, animation, secondaryAnimation) =>
+                  const PlatformLandingScreen(),
+          transitionsBuilder:
+              (context, animation, secondaryAnimation, child) =>
+                  FadeTransition(opacity: animation, child: child),
+          transitionDuration: const Duration(milliseconds: 450),
         ),
       );
-    }
+    });
   }
 
   @override
   void dispose() {
-    _logoController.dispose();
-    _textController.dispose();
+    _navigationTimer?.cancel();
+    _controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
+      body: DecoratedBox(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFF0A0A0F), Color(0xFF0D0D1A), Color(0xFF0A0A0F)],
+            colors: [Color(0xFF080A12), Color(0xFF0E1528), Color(0xFF080A12)],
           ),
         ),
         child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Logo
-              AnimatedBuilder(
-                animation: _logoController,
-                builder: (_, child) => Opacity(
-                  opacity: _logoOpacity.value,
-                  child: Transform.scale(
-                    scale: _logoScale.value,
-                    child: child,
-                  ),
-                ),
-                child: Container(
-                  width: 130,
-                  height: 130,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [Color(0xFF00D4FF), Color(0xFF7B2FFF)],
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF00D4FF).withOpacity(0.45),
-                        blurRadius: 50,
-                        spreadRadius: 10,
+          child: FadeTransition(
+            opacity: _fade,
+            child: ScaleTransition(
+              scale: _scale,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 108,
+                    height: 108,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF38D7FF), Color(0xFF7A6BFF)],
                       ),
-                      BoxShadow(
-                        color: const Color(0xFF7B2FFF).withOpacity(0.3),
-                        blurRadius: 60,
-                        spreadRadius: 5,
-                        offset: const Offset(20, 20),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.visibility_rounded,
-                    size: 60,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 36),
-
-              // Text block
-              AnimatedBuilder(
-                animation: _textController,
-                builder: (_, child) => Opacity(
-                  opacity: _textOpacity.value,
-                  child: SlideTransition(position: _textSlide, child: child),
-                ),
-                child: Column(
-                  children: [
-                    ShaderMask(
-                      shaderCallback: (bounds) => const LinearGradient(
-                        colors: [Color(0xFF00D4FF), Color(0xFF7B2FFF)],
-                      ).createShader(bounds),
-                      child: const Text(
-                        'VisionVoice',
-                        style: TextStyle(
-                          fontSize: 42,
-                          fontWeight: FontWeight.w900,
-                          color: Colors.white,
-                          letterSpacing: 1.5,
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(
+                            0xFF38D7FF,
+                          ).withValues(alpha: 0.22),
+                          blurRadius: 36,
+                          offset: const Offset(0, 18),
                         ),
-                      ),
+                      ],
                     ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'See the World Through Sound',
-                      style: TextStyle(
-                        color: Color(0xFFAAAAAC),
-                        fontSize: 15,
-                        letterSpacing: 0.8,
-                      ),
+                    child: const Icon(
+                      Icons.visibility_rounded,
+                      color: Colors.white,
+                      size: 52,
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 30),
+                  const Text(
+                    'VisionVoice',
+                    style: TextStyle(
+                      color: Color(0xFFF6F9FF),
+                      fontSize: 42,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'See the World Through Sound',
+                    style: TextStyle(
+                      color: Color(0xFFB7C0D3),
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
-
-              const SizedBox(height: 60),
-              const SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation(Color(0xFF00D4FF)),
-                  strokeWidth: 2,
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

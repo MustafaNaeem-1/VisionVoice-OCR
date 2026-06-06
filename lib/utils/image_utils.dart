@@ -1,11 +1,7 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:camera/camera.dart';
-import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'package:flutter/foundation.dart';
-
 
 /// Utility class that converts a [CameraImage] (YUV420 / BGRA8888) into
 /// an [InputImage] that ML Kit can process.  Handles rotation mapping

@@ -1,78 +1,182 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
+import '../models/recognition_language.dart';
 
-/// A panel that displays the detected text from the OCR scanner.
-/// It features a sleek glassmorphic-inspired dark design with
-/// smooth scrolling and high contrast.
 class DetectedTextPanel extends StatelessWidget {
-  final String text;
-  final bool isEmpty;
-
   const DetectedTextPanel({
     super.key,
     required this.text,
-    required this.isEmpty,
+    required this.status,
+    required this.language,
+    required this.isExpanded,
+    required this.onToggleExpanded,
+    required this.isSpeaking,
   });
+
+  final String text;
+  final ScannerStatus status;
+  final RecognitionLanguage language;
+  final bool isExpanded;
+  final VoidCallback onToggleExpanded;
+  final bool isSpeaking;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      height: 220, // Fixed height for consistent bottom panel
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF161622),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: const Color(0xFF333344),
-          width: 1.5,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.4),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
+    final hasText = text.trim().isNotEmpty;
+    final preview =
+        hasText ? text.trim() : 'Point the camera at text to begin.';
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(26),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOut,
+          width: double.infinity,
+          constraints: BoxConstraints(
+            minHeight: 132,
+            maxHeight: isExpanded ? 330 : 168,
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                isEmpty ? Icons.text_snippet_outlined : Icons.text_snippet_rounded,
-                color: isEmpty ? const Color(0xFF666680) : const Color(0xFF00D4FF),
-                size: 20,
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+          decoration: BoxDecoration(
+            color: const Color(0xFF101522).withValues(alpha: 0.78),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.34),
+                blurRadius: 22,
+                offset: const Offset(0, 12),
               ),
-              const SizedBox(width: 8),
-              Text(
-                'DETECTED TEXT',
-                style: TextStyle(
-                  color: isEmpty ? const Color(0xFF666680) : const Color(0xFF00D4FF),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.2,
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  _StatusDot(status: status, isSpeaking: isSpeaking),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      isSpeaking ? ScannerStatus.speaking.label : status.label,
+                      style: const TextStyle(
+                        color: Color(0xFFF6F9FF),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  _LanguageBadge(language: language),
+                  const SizedBox(width: 8),
+                  Semantics(
+                    button: true,
+                    label:
+                        isExpanded
+                            ? 'Collapse detected text'
+                            : 'Expand detected text',
+                    child: IconButton(
+                      onPressed: onToggleExpanded,
+                      icon: Icon(
+                        isExpanded
+                            ? Icons.keyboard_arrow_down_rounded
+                            : Icons.keyboard_arrow_up_rounded,
+                      ),
+                      color: const Color(0xFFF6F9FF),
+                      tooltip: isExpanded ? 'Collapse' : 'Expand',
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  child: SelectableText(
+                    preview,
+                    textDirection:
+                        _containsArabic(preview)
+                            ? TextDirection.rtl
+                            : TextDirection.ltr,
+                    style: TextStyle(
+                      color:
+                          hasText
+                              ? const Color(0xFFF6F9FF)
+                              : const Color(0xFFAEB6C6),
+                      fontSize: 17,
+                      height: 1.45,
+                      fontWeight: hasText ? FontWeight.w600 : FontWeight.w500,
+                    ),
+                    maxLines: isExpanded ? null : 2,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: SelectableText(
-                isEmpty ? 'No text detected yet. Point your camera at a document...' : text,
-                style: TextStyle(
-                  color: isEmpty ? const Color(0xFF888899) : const Color(0xFFF0F0F5),
-                  fontSize: 16,
-                  height: 1.6,
-                  fontWeight: isEmpty ? FontWeight.w500 : FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
+        ),
+      ),
+    );
+  }
+
+  bool _containsArabic(String value) {
+    return RegExp(r'[\u0600-\u06FF]').hasMatch(value);
+  }
+}
+
+class _StatusDot extends StatelessWidget {
+  const _StatusDot({required this.status, required this.isSpeaking});
+
+  final ScannerStatus status;
+  final bool isSpeaking;
+
+  @override
+  Widget build(BuildContext context) {
+    final color =
+        isSpeaking
+            ? const Color(0xFF38D7FF)
+            : switch (status) {
+              ScannerStatus.textDetected => const Color(0xFF55E6A5),
+              ScannerStatus.error => const Color(0xFFFF6B7A),
+              ScannerStatus.noText => const Color(0xFFFFC857),
+              _ => const Color(0xFF8D96A8),
+            };
+
+    return Container(
+      width: 12,
+      height: 12,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color,
+        boxShadow: [
+          BoxShadow(color: color.withValues(alpha: 0.28), blurRadius: 12),
         ],
+      ),
+    );
+  }
+}
+
+class _LanguageBadge extends StatelessWidget {
+  const _LanguageBadge({required this.language});
+
+  final RecognitionLanguage language;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Text(
+        language.shortLabel,
+        style: const TextStyle(
+          color: Color(0xFFE9F7FF),
+          fontSize: 12,
+          fontWeight: FontWeight.w900,
+        ),
       ),
     );
   }
