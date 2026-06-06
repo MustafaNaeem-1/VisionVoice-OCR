@@ -175,6 +175,11 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
     final displayText =
         _language == RecognitionLanguage.urdu && text.isEmpty && !hasOcrError
             ? 'No Urdu text found. Try holding the camera steady and scan again.'
+            : _language == RecognitionLanguage.urdu &&
+                text.isNotEmpty &&
+                _urduOcrService.lastScore <
+                    UrduOcrService.lowConfidenceScoreThreshold
+            ? UrduOcrService.lowConfidenceMessage
             : text;
     setState(() {
       _detectedText = displayText;
@@ -190,9 +195,10 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
       _panelExpanded = displayText.length > 120;
     });
 
+    final shouldSpeakDetectedText = displayText == text && text.isNotEmpty;
     await _vibrate(duration: text.isEmpty ? 30 : 90);
     try {
-      if (_isTtsEnabled && text.isNotEmpty) {
+      if (_isTtsEnabled && shouldSpeakDetectedText) {
         await _ttsService.speakNow(text, language: _language);
       }
     } catch (error) {
