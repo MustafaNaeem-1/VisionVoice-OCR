@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../models/recognition_language.dart';
 
@@ -31,96 +30,83 @@ class DetectedTextPanel extends StatelessWidget {
             ? TextDirection.rtl
             : TextDirection.ltr;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(22),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 260),
-          curve: Curves.easeOut,
-          width: double.infinity,
-          constraints: BoxConstraints(
-            minHeight: 116,
-            maxHeight: isExpanded ? 260 : 154,
-          ),
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-          decoration: BoxDecoration(
-            color: const Color(0xFF101522).withValues(alpha: 0.72),
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.34),
-                blurRadius: 16,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  _StatusDot(status: status, isSpeaking: isSpeaking),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      isSpeaking ? ScannerStatus.speaking.label : status.label,
-                      style: const TextStyle(
-                        color: Color(0xFFF6F9FF),
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                      ),
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        minHeight: 104,
+        maxHeight: MediaQuery.sizeOf(context).height * 0.25,
+      ),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+        decoration: BoxDecoration(
+          color: const Color.fromRGBO(16, 21, 34, 0.74),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color.fromRGBO(255, 255, 255, 0.12)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                _StatusDot(status: status, isSpeaking: isSpeaking),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    isSpeaking ? ScannerStatus.speaking.label : status.label,
+                    style: const TextStyle(
+                      color: Color(0xFFF6F9FF),
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
                     ),
-                  ),
-                  _LanguageBadge(language: language),
-                  const SizedBox(width: 8),
-                  Semantics(
-                    button: true,
-                    label:
-                        isExpanded
-                            ? 'Collapse detected text'
-                            : 'Expand detected text',
-                    child: IconButton(
-                      onPressed: onToggleExpanded,
-                      icon: Icon(
-                        isExpanded
-                            ? Icons.keyboard_arrow_down_rounded
-                            : Icons.keyboard_arrow_up_rounded,
-                      ),
-                      color: const Color(0xFFF6F9FF),
-                      tooltip: isExpanded ? 'Collapse' : 'Expand',
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Flexible(
-                child: SingleChildScrollView(
-                  physics: const BouncingScrollPhysics(),
-                  child: SelectableText(
-                    preview,
-                    textDirection: textDirection,
-                    textAlign:
-                        textDirection == TextDirection.rtl
-                            ? TextAlign.right
-                            : TextAlign.left,
-                    style: TextStyle(
-                      color:
-                          hasText
-                              ? const Color(0xFFF6F9FF)
-                              : const Color(0xFFAEB6C6),
-                      fontSize: 17,
-                      height: 1.45,
-                      fontWeight: hasText ? FontWeight.w600 : FontWeight.w500,
-                    ),
-                    maxLines: isExpanded ? null : 2,
                   ),
                 ),
+                _LanguageBadge(language: language),
+                const SizedBox(width: 8),
+                Semantics(
+                  button: true,
+                  label:
+                      isExpanded
+                          ? 'Collapse detected text'
+                          : 'Expand detected text',
+                  child: IconButton(
+                    onPressed: onToggleExpanded,
+                    icon: Icon(
+                      isExpanded
+                          ? Icons.keyboard_arrow_down_rounded
+                          : Icons.keyboard_arrow_up_rounded,
+                    ),
+                    color: const Color(0xFFF6F9FF),
+                    tooltip: isExpanded ? 'Collapse' : 'Expand',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Flexible(
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: SelectableText(
+                  preview,
+                  textDirection: textDirection,
+                  textAlign:
+                      textDirection == TextDirection.rtl
+                          ? TextAlign.right
+                          : TextAlign.left,
+                  style: TextStyle(
+                    color:
+                        hasText
+                            ? const Color(0xFFF6F9FF)
+                            : const Color(0xFFAEB6C6),
+                    fontSize: 16,
+                    height: 1.38,
+                    fontWeight: hasText ? FontWeight.w600 : FontWeight.w500,
+                  ),
+                  maxLines: isExpanded ? null : 2,
+                ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -178,6 +164,8 @@ class _LanguageBadge extends StatelessWidget {
       ),
       child: Text(
         language.shortLabel,
+        maxLines: 1,
+        softWrap: false,
         style: const TextStyle(
           color: Color(0xFFE9F7FF),
           fontSize: 12,
