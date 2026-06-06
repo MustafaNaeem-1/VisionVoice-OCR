@@ -10,188 +10,82 @@ class UrduOcrService {
   static const String lowConfidenceMessage =
       'Urdu text detected but confidence is low. Try moving closer, improving lighting, and keeping the text straight.';
   static const int lowConfidenceScoreThreshold = 28;
+  static const Duration ocrTimeout = Duration(seconds: 20);
 
   int lastScore = 0;
 
   Future<String> recognizeUrduFromImagePath(String imagePath) async {
     lastScore = 0;
+    final stopwatch = Stopwatch()..start();
+    String? processedPath;
 
     try {
-      final originalFile = File(imagePath);
-      final originalBytes = await originalFile.readAsBytes();
-      final originalImage = img.decodeImage(originalBytes);
-      if (originalImage == null) {
-        debugPrint('Urdu OCR: could not decode image: $imagePath');
-        return '';
-      }
+      debugPrint('Urdu OCR scan started');
+      debugPrint('Urdu OCR captured image path: $imagePath');
 
-      final fixedOriginal = img.bakeOrientation(originalImage);
-      debugPrint('Urdu OCR original image path: $imagePath');
-      debugPrint(
-        'Urdu OCR original image size: ${fixedOriginal.width}x${fixedOriginal.height}',
+      final tempDir = await getTemporaryDirectory();
+      final processed = await compute(
+        _preprocessUrduImage,
+        _UrduPreprocessRequest(imagePath, tempDir.path),
       );
-      debugPrint('Urdu OCR original file size: ${await originalFile.length()}');
-
-      final candidates = <_UrduImageCandidate>[
-        _UrduImageCandidate(
-          label: 'original',
-          path: imagePath,
-          width: fixedOriginal.width,
-          height: fixedOriginal.height,
-        ),
-        ...await _createProcessedCandidates(fixedOriginal),
-      ];
-
-      for (final candidate in candidates.where((c) => c.label != 'original')) {
-        debugPrint(
-          'Urdu OCR processed image path (${candidate.label}): ${candidate.path}',
-        );
-        debugPrint(
-          'Urdu OCR processed image size (${candidate.label}): ${candidate.width}x${candidate.height}',
-        );
-      }
-
-      final results = <_UrduOcrResult>[];
-      for (final candidate in candidates) {
-        final modes =
-            candidate.label == 'original' ? const [6] : const [6, 11, 7, 13];
-
-        for (final psm in modes) {
-          final raw = await _runTesseract(candidate.path, psm: psm);
-          final cleaned = cleanUrduOcrText(raw);
-          final score = scoreUrduText(cleaned);
-
-          debugPrint('Urdu OCR ${candidate.label} PSM $psm raw:\n$raw');
-          debugPrint('Urdu OCR ${candidate.label} PSM $psm cleaned:\n$cleaned');
-          debugPrint('Urdu OCR ${candidate.label} PSM $psm score: $score');
-
-          results.add(
-            _UrduOcrResult(
-              candidateLabel: candidate.label,
-              psm: psm,
-              rawText: raw,
-              cleanedText: cleaned,
-              score: score,
-            ),
-          );
-        }
-      }
-
-      if (results.isEmpty) return '';
-      results.sort((a, b) => b.score.compareTo(a.score));
-      final best = results.first;
-      lastScore = best.score;
+      processedPath = processed.path;
 
       debugPrint(
-        'Selected Urdu OCR result: ${best.candidateLabel} PSM ${best.psm} score ${best.score}\n${best.cleanedText}',
+        'Urdu OCR original size: ${processed.originalWidth}x${processed.originalHeight}',
+      );
+      debugPrint(
+        'Urdu OCR processed size: ${processed.processedWidth}x${processed.processedHeight}',
+      );
+      debugPrint('Urdu OCR processed image path: $processedPath');
+      debugPrint('Urdu OCR started');
+
+      final raw = await _runTesseract(processedPath).timeout(
+        ocrTimeout,
+        onTimeout: () {
+          debugPrint('Urdu OCR timed out after ${ocrTimeout.inSeconds}s');
+          return '';
+        },
       );
 
-      return best.cleanedText;
+      final cleaned = cleanUrduOcrText(raw);
+      lastScore = scoreUrduText(cleaned);
+
+      stopwatch.stop();
+      debugPrint('Urdu OCR raw:\n$raw');
+      debugPrint('Urdu OCR cleaned:\n$cleaned');
+      debugPrint('Urdu OCR score: $lastScore');
+      debugPrint('Urdu OCR finished in ${stopwatch.elapsedMilliseconds}ms');
+
+      return cleaned;
     } catch (error, stackTrace) {
-      debugPrint('Urdu OCR failed: $error');
+      stopwatch.stop();
+      debugPrint(
+        'Urdu OCR error after ${stopwatch.elapsedMilliseconds}ms: $error',
+      );
       debugPrintStack(stackTrace: stackTrace);
       return '';
+    } finally {
+      if (processedPath != null) {
+        await _deleteIfPresent(processedPath);
+      }
     }
   }
 
   Future<String> preprocessForUrduOcr(String imagePath) async {
-    final bytes = await File(imagePath).readAsBytes();
-    final decoded = img.decodeImage(bytes);
-    if (decoded == null) return imagePath;
-
-    final fixed = img.bakeOrientation(decoded);
-    final processed = _preprocessImage(_centerCrop(fixed), threshold: 0.56);
-    return _writeTempImage(processed, 'urdu_processed_primary');
-  }
-
-  Future<List<_UrduImageCandidate>> _createProcessedCandidates(
-    img.Image source,
-  ) async {
-    final crop = _centerCrop(source);
-    final soft = _preprocessImage(crop, threshold: null);
-    final threshold56 = _preprocessImage(crop, threshold: 0.56);
-    final threshold50 = _preprocessImage(crop, threshold: 0.50);
-
-    final processed = <({String label, img.Image image})>[
-      (label: 'center-soft', image: soft),
-      (label: 'center-threshold-56', image: threshold56),
-      (label: 'center-threshold-50', image: threshold50),
-    ];
-
-    final candidates = <_UrduImageCandidate>[];
-    for (final item in processed) {
-      final path = await _writeTempImage(item.image, item.label);
-      candidates.add(
-        _UrduImageCandidate(
-          label: item.label,
-          path: path,
-          width: item.image.width,
-          height: item.image.height,
-        ),
-      );
-    }
-
-    return candidates;
-  }
-
-  img.Image _centerCrop(img.Image source) {
-    final cropWidth = (source.width * 0.82).round();
-    final cropHeight = (source.height * 0.58).round();
-    final x = ((source.width - cropWidth) / 2).round();
-    final y = ((source.height - cropHeight) / 2).round();
-
-    return img.copyCrop(
-      source,
-      x: max(0, x),
-      y: max(0, y),
-      width: min(cropWidth, source.width),
-      height: min(cropHeight, source.height),
-    );
-  }
-
-  img.Image _preprocessImage(img.Image source, {required double? threshold}) {
-    var processed = img.Image.from(source);
-
-    processed = img.grayscale(processed);
-
-    if (processed.width < 1500) {
-      final scale = processed.width < 900 ? 3 : 2;
-      processed = img.copyResize(
-        processed,
-        width: processed.width * scale,
-        interpolation: img.Interpolation.cubic,
-      );
-    }
-
-    processed = img.adjustColor(processed, contrast: 1.38, brightness: 1.04);
-    processed = img.convolution(
-      processed,
-      filter: const [0, -0.35, 0, -0.35, 2.4, -0.35, 0, -0.35, 0],
-      amount: 0.55,
-    );
-
-    if (threshold != null) {
-      processed = img.luminanceThreshold(processed, threshold: threshold);
-    }
-
-    return processed;
-  }
-
-  Future<String> _writeTempImage(img.Image image, String label) async {
     final tempDir = await getTemporaryDirectory();
-    final safeLabel = label.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
-    final path =
-        '${tempDir.path}${Platform.pathSeparator}${safeLabel}_${DateTime.now().microsecondsSinceEpoch}.png';
-    await File(path).writeAsBytes(img.encodePng(image), flush: true);
-    return path;
+    final processed = await compute(
+      _preprocessUrduImage,
+      _UrduPreprocessRequest(imagePath, tempDir.path),
+    );
+    return processed.path;
   }
 
-  Future<String> _runTesseract(String imagePath, {required int psm}) async {
+  Future<String> _runTesseract(String imagePath) async {
     return FlutterTesseractOcr.extractText(
       imagePath,
       language: 'urd',
-      args: {
-        'psm': '$psm',
+      args: const {
+        'psm': '6',
         'preserve_interword_spaces': '1',
         'tessedit_do_invert': '0',
         'user_defined_dpi': '300',
@@ -205,11 +99,12 @@ class UrduOcrService {
 
     final arabicChars = RegExp(r'[\u0600-\u06FF]').allMatches(trimmed).length;
     final latinChars = RegExp(r'[A-Za-z]').allMatches(trimmed).length;
-    final digits = RegExp(r'[0-9۰-۹٠-٩]').allMatches(trimmed).length;
+    final digits =
+        RegExp(r'[0-9\u06F0-\u06F9\u0660-\u0669]').allMatches(trimmed).length;
     final words = RegExp(r'[\u0600-\u06FF]{2,}').allMatches(trimmed).length;
     final symbols =
         RegExp(
-          r'[^\u0600-\u06FF0-9۰-۹٠-٩\s،؛؟۔,.!?()\[\]{}\-:/]',
+          r'[^\u0600-\u06FF0-9\u06F0-\u06F9\u0660-\u0669\s،؛؟۔,.!?()\[\]{}\-:/]',
         ).allMatches(trimmed).length;
 
     var score = (arabicChars * 3) + (words * 8) + min(digits, 8);
@@ -221,17 +116,15 @@ class UrduOcrService {
     return max(0, score).toInt();
   }
 
-  bool containsUrdu(String text) {
-    return RegExp(r'[\u0600-\u06FF]').hasMatch(text);
-  }
-
   String cleanUrduOcrText(String raw) {
     final normalized = raw
         .replaceAll('\uFEFF', '')
         .replaceAll(RegExp(r'[\u200B-\u200F\u202A-\u202E]'), '')
         .replaceAll(RegExp(r'[A-Za-z]+'), ' ')
         .replaceAll(
-          RegExp(r'[^\u0600-\u06FF0-9۰-۹٠-٩\s،؛؟۔,.!?()\[\]{}\-:/]'),
+          RegExp(
+            r'[^\u0600-\u06FF0-9\u06F0-\u06F9\u0660-\u0669\s،؛؟۔,.!?()\[\]{}\-:/]',
+          ),
           ' ',
         )
         .replaceAll(RegExp(r'([،؛؟۔,.!?])\1{2,}'), r'$1')
@@ -246,34 +139,78 @@ class UrduOcrService {
 
     return lines.join('\n').trim();
   }
+
+  Future<void> _deleteIfPresent(String path) async {
+    try {
+      final file = File(path);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {}
+  }
 }
 
-class _UrduImageCandidate {
-  const _UrduImageCandidate({
-    required this.label,
+class _UrduPreprocessRequest {
+  const _UrduPreprocessRequest(this.imagePath, this.tempDirectoryPath);
+
+  final String imagePath;
+  final String tempDirectoryPath;
+}
+
+class _UrduPreprocessResult {
+  const _UrduPreprocessResult({
     required this.path,
-    required this.width,
-    required this.height,
+    required this.originalWidth,
+    required this.originalHeight,
+    required this.processedWidth,
+    required this.processedHeight,
   });
 
-  final String label;
   final String path;
-  final int width;
-  final int height;
+  final int originalWidth;
+  final int originalHeight;
+  final int processedWidth;
+  final int processedHeight;
 }
 
-class _UrduOcrResult {
-  const _UrduOcrResult({
-    required this.candidateLabel,
-    required this.psm,
-    required this.rawText,
-    required this.cleanedText,
-    required this.score,
-  });
+Future<_UrduPreprocessResult> _preprocessUrduImage(
+  _UrduPreprocessRequest request,
+) async {
+  final bytes = await File(request.imagePath).readAsBytes();
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) {
+    throw const FormatException('Could not decode captured image.');
+  }
 
-  final String candidateLabel;
-  final int psm;
-  final String rawText;
-  final String cleanedText;
-  final int score;
+  final fixed = img.bakeOrientation(decoded);
+  var processed = img.grayscale(fixed);
+
+  if (processed.width > 1600) {
+    processed = img.copyResize(
+      processed,
+      width: 1600,
+      interpolation: img.Interpolation.linear,
+    );
+  } else if (processed.width < 900) {
+    processed = img.copyResize(
+      processed,
+      width: 1200,
+      interpolation: img.Interpolation.linear,
+    );
+  }
+
+  processed = img.adjustColor(processed, contrast: 1.16, brightness: 1.02);
+  processed = img.luminanceThreshold(processed, threshold: 0.55);
+
+  final outputPath =
+      '${request.tempDirectoryPath}${Platform.pathSeparator}urdu_ocr_${DateTime.now().microsecondsSinceEpoch}.png';
+  await File(outputPath).writeAsBytes(img.encodePng(processed), flush: true);
+
+  return _UrduPreprocessResult(
+    path: outputPath,
+    originalWidth: fixed.width,
+    originalHeight: fixed.height,
+    processedWidth: processed.width,
+    processedHeight: processed.height,
+  );
 }

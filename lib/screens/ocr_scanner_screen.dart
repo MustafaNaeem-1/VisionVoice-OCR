@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -229,7 +230,16 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
     if (controller == null || !controller.value.isInitialized) return '';
 
     final XFile image = await controller.takePicture();
-    return _urduOcrService.recognizeUrduFromImagePath(image.path);
+    try {
+      return await _urduOcrService.recognizeUrduFromImagePath(image.path);
+    } finally {
+      try {
+        final file = File(image.path);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      } catch (_) {}
+    }
   }
 
   Future<void> _toggleTts() async {
