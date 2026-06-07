@@ -200,8 +200,11 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
     await _vibrate(duration: text.isEmpty ? 30 : 90);
     try {
       if (_isTtsEnabled && shouldSpeakDetectedText) {
-        await _ttsService.speakNow(text, language: _language);
+        await _speakDetectedText(text);
       }
+    } on TtsVoiceUnavailableException catch (error) {
+      debugPrint('Urdu TTS unavailable after scan');
+      if (mounted) _showUrduTtsUnavailableMessage(error.message);
     } catch (error) {
       debugPrint('TTS failed after scan: $error');
       if (mounted) setState(() => _isSpeaking = false);
@@ -273,7 +276,34 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
       return;
     }
     await _vibrate(duration: 45);
-    await _ttsService.speakNow(_detectedText, language: _language);
+    try {
+      await _speakDetectedText(_detectedText);
+    } on TtsVoiceUnavailableException catch (error) {
+      debugPrint('Urdu TTS unavailable on re-read');
+      if (mounted) _showUrduTtsUnavailableMessage(error.message);
+    }
+  }
+
+  Future<void> _speakDetectedText(String text) async {
+    if (_language == RecognitionLanguage.urdu) {
+      await _ttsService.speakUrdu(text);
+      return;
+    }
+
+    await _ttsService.speakNow(text, language: _language);
+  }
+
+  void _showUrduTtsUnavailableMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        action: SnackBarAction(
+          label: 'Open TTS Settings',
+          onPressed: () => unawaited(_ttsService.openTtsSettings()),
+        ),
+      ),
+    );
   }
 
   Future<void> _vibrate({int duration = 50}) async {
