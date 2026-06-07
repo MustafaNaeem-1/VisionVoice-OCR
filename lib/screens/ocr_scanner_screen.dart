@@ -11,8 +11,6 @@ import '../services/google_vision_urdu_ocr_service.dart';
 import '../services/tts_service.dart';
 import '../widgets/detected_text_panel.dart';
 
-enum ScanMode { live, frozen }
-
 class OCRScannerScreen extends StatefulWidget {
   const OCRScannerScreen({super.key});
 
@@ -31,7 +29,6 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
 
   RecognitionLanguage _language = RecognitionLanguage.english;
   ScannerStatus _status = ScannerStatus.initializing;
-  ScanMode _mode = ScanMode.live;
   String _detectedText = '';
   String _errorMessage = '';
   bool _isInitialized = false;
@@ -89,7 +86,7 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
       return;
     }
 
-    await _cameraService.startStream();
+    await _cameraService.stopStream();
     if (!mounted) return;
     setState(() {
       _isInitialized = true;
@@ -98,21 +95,7 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
   }
 
   void _onTextRecognized(String text, List<TextBlock> blocks) {
-    if (!mounted || _mode == ScanMode.frozen) return;
-    if (_language != RecognitionLanguage.english) return;
-
-    final trimmed = text.trim();
-    setState(() {
-      _detectedText = trimmed;
-      if (_status != ScannerStatus.error || trimmed.isNotEmpty) {
-        _status =
-            trimmed.isEmpty ? ScannerStatus.noText : ScannerStatus.textDetected;
-      }
-    });
-
-    if (_isTtsEnabled && trimmed.isNotEmpty) {
-      _ttsService.smartSpeak(trimmed, language: _language);
-    }
+    return;
   }
 
   Future<void> _changeLanguage(RecognitionLanguage language) async {
@@ -121,11 +104,7 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
     await _ttsService.stop();
     await _ttsService.setLanguage(language);
     await _cameraService.setLanguage(language);
-    if (language == RecognitionLanguage.english && _isInitialized) {
-      await _cameraService.resumeStream();
-    } else {
-      await _cameraService.stopStream();
-    }
+    await _cameraService.stopStream();
     if (!mounted) return;
     setState(() {
       _language = language;
@@ -145,7 +124,6 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
     await _cameraService.stopStream();
 
     setState(() {
-      _mode = ScanMode.frozen;
       _status =
           _language == RecognitionLanguage.urdu
               ? ScannerStatus.readingUrdu
@@ -191,7 +169,6 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
       _detectedText = displayText;
       _isCapturing = false;
       _isScanning = false;
-      _mode = ScanMode.live;
       _status =
           hasOcrError
               ? ScannerStatus.error
@@ -216,10 +193,6 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
     } catch (error) {
       debugPrint('TTS failed after scan: $error');
       if (mounted) setState(() => _isSpeaking = false);
-    } finally {
-      if (_language == RecognitionLanguage.english) {
-        await _cameraService.resumeStream();
-      }
     }
   }
 
@@ -230,10 +203,33 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
   }
 
   Future<String> _captureAndRecognizeEnglish() async {
-    final RecognizedText? result = await _cameraService.captureAndRecognize(
-      language: _language,
-    );
-    return result?.text.trim() ?? '';
+    final controller = _cameraService.controller;
+    if (controller == null || !controller.value.isInitialized) return '';
+
+    final XFile image = await controller.takePicture();
+
+    try {
+      final inputImage = InputImage.fromFilePath(image.path);
+      final textRecognizer = TextRecognizer(
+        script: TextRecognitionScript.latin,
+      );
+
+      try {
+        final RecognizedText result = await textRecognizer.processImage(
+          inputImage,
+        );
+        return result.text.trim();
+      } finally {
+        await textRecognizer.close();
+      }
+    } finally {
+      try {
+        final file = File(image.path);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      } catch (_) {}
+    }
   }
 
   Future<String> _captureAndRecognizeUrdu() async {
@@ -628,11 +624,11 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
   String _subtitleForLanguage(RecognitionLanguage language) {
     switch (language) {
       case RecognitionLanguage.english:
-        return 'English OCR with en-US speech';
+        return 'English OCR with hold-to-scan.';
       case RecognitionLanguage.urdu:
         return 'Urdu OCR with ur-PK speech.';
       case RecognitionLanguage.auto:
-        return 'Automatically detects language.';
+        return 'Automatically detects English or Urdu.';
     }
   }
 }
