@@ -7,26 +7,35 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
-    private val ttsSettingsChannel = "vision_voice/tts_settings"
+    private val channel = "vision_voice/tts_settings"
+    private val ttsSettingsAction = "com.android.settings.TTS_SETTINGS"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, ttsSettingsChannel)
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "openTtsSettings" -> {
-                        openTtsSettings()
-                        result.success(null)
-                    }
-                    else -> result.notImplemented()
-                }
-            }
-    }
 
-    private fun openTtsSettings() {
-        val intent = Intent(Settings.ACTION_TEXT_TO_SPEECH_SETTINGS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            channel
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "openTtsSettings" -> {
+                    try {
+                        val intent = Intent(ttsSettingsAction).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error(
+                            "TTS_SETTINGS_ERROR",
+                            "Could not open Text-to-Speech settings",
+                            e.message
+                        )
+                    }
+                }
+
+                else -> result.notImplemented()
+            }
         }
-        startActivity(intent)
     }
 }
