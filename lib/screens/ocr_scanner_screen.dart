@@ -624,11 +624,11 @@ class _OCRScannerScreenState extends State<OCRScannerScreen>
   String _subtitleForLanguage(RecognitionLanguage language) {
     switch (language) {
       case RecognitionLanguage.english:
-        return 'English OCR with hold-to-scan.';
+        return 'Scan and read English text aloud';
       case RecognitionLanguage.urdu:
-        return 'Urdu OCR with ur-PK speech.';
+        return 'Scan and read Urdu text aloud.';
       case RecognitionLanguage.auto:
-        return 'Automatically detects English or Urdu.';
+        return 'Automatically detects and reads English or Urdu.';
     }
   }
 }
