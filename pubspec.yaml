@@ -46,4 +46,3 @@ flutter:
   assets:
     - assets/tessdata_config.json
     - assets/tessdata/
-git log --oneline

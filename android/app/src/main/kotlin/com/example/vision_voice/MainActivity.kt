@@ -24,8 +24,9 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun openTtsSettings() {
-        val intent = Intent(Settings.ACTION_TEXT_TO_SPEECH_SETTINGS)
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val intent = Intent(Settings.ACTION_TEXT_TO_SPEECH_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
         startActivity(intent)
     }
 }
