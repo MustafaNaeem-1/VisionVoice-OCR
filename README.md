@@ -231,12 +231,21 @@ build/app/outputs/flutter-apk/
 
 ## Screenshots
 
+### Loading Screen
 
-```markdown
-![Home Screen](screenshots/home.png)
-![Language Selection](screenshots/language-selection.png)
-![OCR Result](screenshots/ocr-result.png)
-```
+![Loading Screen](media/screenshots/Loading%20Screen.png)
+
+### Main Screen using English Mode
+
+![Main Screen using English Mode](media/screenshots/Main%20Screen%20using%20English%20Mode.png)
+
+### Option Screen
+
+![Option Screen](media/screenshots/Option%20Screen.png)
+
+### Main Screen using Urdu Mode
+
+![Main Screen using Urdu Mode](media/screenshots/Main%20Screen%20using%20Urdu%20Mode.png)
 
 ---
 
