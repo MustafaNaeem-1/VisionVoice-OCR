@@ -233,19 +233,19 @@ build/app/outputs/flutter-apk/
 
 ### Loading Screen
 
-![Loading Screen](media/screenshots/Loading%20Screen.png)
+<img src="media/screenshots/Loading-Screen.png" width="220"/>
 
-### Main Screen using English Mode
+### English Mode
 
-![Main Screen using English Mode](media/screenshots/Main%20Screen%20using%20English%20Mode.png)
+<img src="media/screenshots/English-Mode.png" width="220"/>
 
-### Option Screen
+### Urdu Mode
 
-![Option Screen](media/screenshots/Option%20Screen.png)
+<img src="media/screenshots/Urdu-Mode.png" width="220"/>
 
-### Main Screen using Urdu Mode
+### Selection Screen
 
-![Main Screen using Urdu Mode](media/screenshots/Main%20Screen%20using%20Urdu%20Mode.png)
+<img src="media/screenshots/Selection-Screen.png" width="220"/>
 
 ---
 
